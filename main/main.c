@@ -11,8 +11,11 @@
 #include "bsp/esp-bsp.h"
 #include "bsp_board.h"
 
+#include "audio_player.h"
 // APP
 #include "app_wifi.h"
+#include "app_minmax_tts.h"
+#include "app_audio.h"
 
 const char *TAG = "main";
 
@@ -27,10 +30,21 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    bsp_spiffs_mount();
     bsp_i2c_init();
     bsp_board_init();
 
     ESP_ERROR_CHECK(esp_netif_init());
     app_wifi_init();
     app_wifi_connect("208", "iot208208208");
+
+    audio_record_init();
+
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    if (app_wifi_get_connect_status())
+    {
+        app_minmax_tts_init();
+    }
+    app_minmax_tts_https_post("感觉时间好快呀，夏天又快要结束了");
 }
