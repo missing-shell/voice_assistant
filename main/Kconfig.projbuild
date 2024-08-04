@@ -1,0 +1,24 @@
+menu "Voice Assistant Configuration"
+    menu "MinMax Configuration"
+        config MINMAX_TTS_URL
+            string "MINMAX TTS HTTP Endpoint"
+            default "https://api.minimax.chat/v1/t2a_v2?GroupId=1xxxxxxxxx412976"
+            help
+                Target endpoint host-name for the example to use.
+
+        config MINMAX_API_KEY
+            string "MINMAX API KEY"
+            default "eyJxxxxxxxxxxxxxxxhbxxxxxxx"
+            help
+                MinMax api key to use.
+    endmenu
+
+    menu "Audio Palyer Configuration"
+        config VOLUME_LEVEL
+            int "volume level"
+            default "70"
+            range 1 100
+            help
+                speaker volume
+    endmenu
+endmenu
