@@ -227,7 +227,7 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 
-void _https_with_url_init(void)
+static void _https_with_url_init(void)
 {
     if (_g_client == NULL)
     {

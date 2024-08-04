@@ -38,10 +38,6 @@ extern "C"
      */
 
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-    /**
-     * Initializes HTTPS with URL configuration.
-     */
-    void _https_with_url_init(void);
 
     /**
      * Posts text to TTS service over HTTPS.
