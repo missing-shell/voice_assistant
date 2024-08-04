@@ -1,5 +1,11 @@
 menu "Voice Assistant Configuration"
     menu "MinMax Configuration"
+        config MINMAX_LLM_URL
+            string "MINMAX LLM HTTP Endpoint"
+            default "https://api.minimax.chat/v1/text/chatcompletion_pro?GroupId=1810530961268412976"
+            help
+                MinMax LLM HTTP Endpoint to use.
+
         config MINMAX_TTS_URL
             string "MINMAX TTS HTTP Endpoint"
             default "https://api.minimax.chat/v1/t2a_v2?GroupId=1xxxxxxxxx412976"
@@ -14,11 +20,22 @@ menu "Voice Assistant Configuration"
     endmenu
 
     menu "Audio Palyer Configuration"
+        config VOICE_ID
+            string "Speaker Id"
+            default "qiumum_0gushi"
+            help
+                speaker id from https://czyt.tech/post/a-free-tts-api/?from_wecom=1
         config VOLUME_LEVEL
             int "volume level"
             default "70"
             range 1 100
             help
                 speaker volume
+        config MAX_TOKEN
+            int "Chat GPT Response Token"
+            default 500
+            range 1 2048
+            help
+                Chat GPT response token between 1 - 2048.     
     endmenu
 endmenu
