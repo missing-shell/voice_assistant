@@ -1,5 +1,17 @@
 menu "Voice Assistant Configuration"
     menu "MinMax Configuration"
+        config Baidu_IAR_Base_URL
+            string "baidu iar base url"
+            default "https://vop.baidu.com/server_api"
+            help
+                Baidu iar base url to use.
+       
+        config Baidu_IAR_Access_Token
+            string "baidu iar access token"
+            default "24.1XXXXXXXXXXXXXXXX668.282335-90318812"
+            help
+                Baidu iar access token to use.
+
         config MINMAX_LLM_URL
             string "MINMAX LLM HTTP Endpoint"
             default "https://api.minimax.chat/v1/text/chatcompletion_pro?GroupId=1810530961268412976"
