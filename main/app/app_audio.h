@@ -34,14 +34,13 @@ extern "C"
 
     typedef void (*audio_play_finish_cb_t)(void);
 
-    /**
-     * @brief The buffer to hold the recorded audio.
-     */
-    extern uint8_t *tts_rx_buffer;
+    void sr_handler_task(void *pvParam);
 
     esp_err_t audio_play_task(void *filepath);
 
     void audio_record_init();
+
+    void audio_record_save(int16_t *audio_buffer, int audio_chunksize);
 
     void audio_register_play_finish_cb(audio_play_finish_cb_t cb);
 
