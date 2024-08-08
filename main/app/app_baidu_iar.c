@@ -238,7 +238,7 @@ static void _https_with_url_init(void)
         }
     }
 }
-void app_baidu_iar_https_post(const char *speech, const uint16_t wav_len)
+void app_baidu_iar_https_post(const char *speech, const uint32_t wav_len)
 {
     if (_g_client == NULL)
     {
@@ -248,9 +248,9 @@ void app_baidu_iar_https_post(const char *speech, const uint16_t wav_len)
     esp_http_client_set_header(_g_client, "Content-Type", "application/json");
     esp_http_client_set_header(_g_client, "Accept", "application/json");
 
-    static uint16_t speech_base64_size = 0;
+    static uint32_t speech_base64_size = 0;
     mbedtls_base64_encode(NULL, 0, &speech_base64_size, (const unsigned char *)speech, wav_len);
-    ESP_LOGI(TAG, "speech size after base64 encoding: %zu", speech_base64_size); // 输出编码后数据的大小
+    ESP_LOGI(TAG, "speech size after base64 encoding: %lu", speech_base64_size); // 输出编码后数据的大小
 
     char *speech_base64 = heap_caps_calloc(1, speech_base64_size + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     assert(speech_base64);

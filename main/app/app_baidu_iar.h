@@ -36,7 +36,7 @@ extern "C"
      * @param speech Pointer to the speech data in WAV format.
      * @param wav_len Length of the speech data in bytes.
      */
-    void app_baidu_iar_https_post(const char *speech, const uint16_t wav_len);
+    void app_baidu_iar_https_post(const char *speech, const uint32_t wav_len);
 #endif // CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 
     /**
