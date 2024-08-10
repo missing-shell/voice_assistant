@@ -278,22 +278,8 @@ void app_minmax_llm_https_post(const char *text)
 }
 #endif // CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 
-void app_minmax_llm_task(void *pvParameters)
-{
-    llm_rx_buffer = heap_caps_calloc(1, LLM_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    assert(llm_rx_buffer);
-    ESP_LOGI(TAG, "llm_rx_buffer with a size: %zu\n", LLM_SIZE);
-    _https_with_url_init();
-    while (1)
-    {
-        // TODO:使用事件组或事件通知替代轮询
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        app_minmax_llm_https_post("什么是夏天");
-    }
-}
 void app_minmax_llm_deinit(void)
 {
-
     // Free the allocated memory for the payload
     free(_g_request_payload.bot_setting[0].bot_name);
     free(_g_request_payload.bot_setting[0].content);
@@ -310,10 +296,12 @@ void app_minmax_llm_deinit(void)
     {
         esp_http_client_cleanup(_g_client);
     }
-    vTaskDelete(app_minmax_llm_task);
 }
 
 void app_minmax_llm_init(void)
 {
-    xTaskCreatePinnedToCore(app_minmax_llm_task, "NetWork Task", 5 * 1024, NULL, 5, NULL, 0);
+    llm_rx_buffer = heap_caps_calloc(1, LLM_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    assert(llm_rx_buffer);
+    ESP_LOGI(TAG, "llm_rx_buffer with a size: %zu\n", LLM_SIZE);
+    _https_with_url_init();
 }

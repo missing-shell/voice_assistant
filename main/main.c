@@ -16,6 +16,10 @@
 #include "app_wifi.h"
 #include "app_minmax_tts.h"
 #include "app_audio.h"
+#include "app_minmax_llm.h"
+#include "app_baidu_iar.h"
+#include "app_sr.h"
+#include "app_agent.h"
 
 const char *TAG = "main";
 
@@ -44,7 +48,7 @@ void app_main(void)
 
     if (app_wifi_get_connect_status())
     {
-        app_minmax_tts_init();
+        app_agent_init();
+        app_sr_start(false);
     }
-    app_minmax_tts_https_post("感觉时间好快呀，夏天又快要结束了");
 }
