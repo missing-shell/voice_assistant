@@ -28,9 +28,19 @@ static esp_http_client_handle_t _g_client = NULL;
 static uint8_t *tts_rx_buffer = NULL;
 static uint32_t tts_rx_total_len = 0;
 
-// 用于保存解析后的音频数据
-static char *hex_audio_data = NULL;
-static size_t hex_audio_data_len = 0;
+static bool is_data = false;
+
+// 定义解析状态枚举类型
+typedef enum
+{
+    WAITING_FOR_DATA, // 等待 "data:" 的开始
+    WAITING_FOR_CRLF, // 等待 "\r\n" 的结束标记
+} parse_state_t;
+
+static parse_state_t CUR_PARSE_STATE = WAITING_FOR_DATA; // 当前解析状态
+static int cur_cnt_pos = 0;                              // 当前处理到的字符位置
+static int json_start_pos = 0;                           // JSON 起始位置
+static int json_end_pos = 0;
 
 /**
  * @brief Internal function to initialize TTS (Text-to-Speech) payload data.
@@ -45,7 +55,7 @@ static tts_payload_t _app_minmax_tts_payload_init(const char *text)
     tts_payload_t body = {
         .model = strdup("speech-01-turbo"),
         .text = strdup(text),
-        .stream = false,
+        .stream = true,
         .voice_setting = {
             .voice_id = strdup("female-tianmei"),
             .speed = 1,
@@ -91,61 +101,136 @@ static char *_app_minmax_tts_payload_to_json(const tts_payload_t *body)
 }
 
 /**
- * Writes hexadecimal audio data to a file as binary data.
+ * @brief Parses JSON data and extracts audio data.
  *
- * This function takes a hexadecimal string representing audio data and writes it to a file in binary format.
- * It first converts the hexadecimal string into binary data, then opens a file on SPIFFS, and writes the binary data to the file.
+ * This function takes JSON data and its length, parses the JSON, and extracts
+ * the audio data. If successful, it converts the audio data into binary format.
  *
- * @param hex_audio_data A null-terminated string containing the hexadecimal audio data.
- * @param hex_audio_data_len The length of the hexadecimal audio data string (in bytes).
+ * @param json_data The JSON data string.
+ * @param json_len The length of the JSON data.
  */
-static void _write_hex_to_file(const char *hex_audio_data, size_t hex_audio_data_len)
+static void _parse_and_write_audio(const char *json_data, size_t json_len)
 {
-    // Ensure the hex_audio_data is not null
-    if (!hex_audio_data)
+    cJSON *root = cJSON_ParseWithLength(json_data, json_len);
+
+    if (!root)
     {
-        ESP_LOGE(TAG, "hex_audio_data is not provided.");
+        ESP_LOGE(TAG, "Failed to parse JSON data.");
         return;
     }
 
-    // Allocate memory for the binary data
-    uint8_t *binary_audio_data = (uint8_t *)heap_caps_malloc(hex_audio_data_len / 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!binary_audio_data)
+    // Get the "data" object
+    cJSON *data = cJSON_GetObjectItem(root, "data");
+
+    if (!data)
     {
-        ESP_LOGE(TAG, "Failed to allocate memory for binary_audio_data.");
+        cJSON_Delete(root);
+        return; // "data" is empty, return directly
+    }
+
+    // Extract the "audio" field from the "data" object
+    cJSON *audio = cJSON_GetObjectItem(data, "audio");
+
+    if (!audio)
+    {
+        ESP_LOGE(TAG, "Missing 'audio' field in JSON data.");
+        cJSON_Delete(root);
         return;
     }
 
-    // Convert the hexadecimal string to binary data
-    for (size_t i = 0; i < hex_audio_data_len; i += 2)
+    // Get the value of the "audio" field
+    const char *audio_hex = audio->valuestring;
+    if (strcmp(audio_hex, "") == 0)
     {
-        char byte[3] = {hex_audio_data[i], hex_audio_data[i + 1], '\0'};
-        binary_audio_data[i / 2] = (uint8_t)strtol(byte, NULL, 16);
-    }
-
-    // Open the file for writing binary data
-    FILE *fp = fopen("/spiffs/output.mp3", "wb");
-    if (!fp)
-    {
-        ESP_LOGE(TAG, "Failed to open file 'output.mp3'.");
-        heap_caps_free(binary_audio_data);
+        cJSON_Delete(root);
         return;
     }
 
-    // Write the binary data to the file
-    size_t written = fwrite(binary_audio_data, 1, hex_audio_data_len / 2, fp);
-    if (written != hex_audio_data_len / 2)
+    // Convert the audio data from a hexadecimal string to binary data
+    size_t audio_len = strlen(audio_hex) / 2;
+
+    void *speechptr = heap_caps_malloc(audio_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    if (!speechptr)
     {
-        ESP_LOGE(TAG, "Failed to write all data to file 'output.mp3'.");
-    }
-    else
-    {
-        ESP_LOGI(TAG, "Written %zu bytes to file 'output.mp3'.", written);
+        ESP_LOGE(TAG, "Failed to allocate memory for audio data.");
+        cJSON_Delete(root);
+        return;
     }
 
-    // Clean up resources
-    heap_caps_free(binary_audio_data);
-    fclose(fp);
+    for (size_t i = 0; i < audio_len; i++)
+    {
+        char hex[3] = {audio_hex[i * 2], audio_hex[i * 2 + 1], '\0'};
+        ((uint8_t *)speechptr)[i] = (uint8_t)strtol(hex, NULL, 16);
+    }
+
+    free(speechptr); // Free the allocated memory
+
+    cJSON_Delete(root);
+}
+
+/**
+ * @brief Updates the parsing state based on the incoming data.
+ *
+ * This function processes incoming data and updates the parsing state according
+ * to the current state and the content of the data. It handles transitions between
+ * different parsing states and invokes the appropriate processing functions.
+ */
+static void _update_parse_state()
+{
+    const char *p = (char *)tts_rx_buffer + cur_cnt_pos; // Get the current character being processed
+    switch (CUR_PARSE_STATE)
+    {
+
+    case WAITING_FOR_DATA:
+
+        // Check if the "data:" start marker has been found
+        if (strncmp(p, "data:", 5) == 0)
+        {
+            CUR_PARSE_STATE = WAITING_FOR_CRLF;
+            json_start_pos = cur_cnt_pos + 5; // Skip "data: " and position to the start of the JSON
+            p += 5;
+            ESP_LOGW(TAG, "[STATE]: WAITING_FOR_DATA -> READING_JSON");
+        }
+        break;
+    case WAITING_FOR_CRLF:
+        // Check if the end-of-line marker "\n" has been encountered
+        if (strncmp(p, "\n", 1) == 0)
+        {
+            json_end_pos = cur_cnt_pos; // Position at the end of the JSON
+            ESP_LOGW(TAG, "[STATE]: WAITING_FOR_CRLF -> JSON_COMPLETE");
+
+            // Get the JSON data string
+            const char *json_str = (const char *)(tts_rx_buffer + json_start_pos);
+            size_t json_len = json_end_pos - json_start_pos;
+
+            // Process the JSON data
+            _parse_and_write_audio(json_str, json_len);
+            CUR_PARSE_STATE = WAITING_FOR_DATA; // Reset state to wait for the next JSON block
+        }
+
+        break;
+    default:
+        // Unknown state, can add error handling here
+        ESP_LOGE(TAG, "[STATE]: Error STATE");
+        break;
+    }
+
+    cur_cnt_pos++; // Move to the next character position
+}
+
+/**
+ * @brief Initializes the parsing state variables.
+ *
+ * This function sets the initial values for the parsing state variables,
+ * preparing the parser for incoming data.
+ */
+static void _init_parse_state()
+{
+    CUR_PARSE_STATE = WAITING_FOR_DATA; // Current parsing state
+    cur_cnt_pos = 0;                    // Current character position being processed
+    json_start_pos = 0;                 // Start position of the JSON data
+    json_end_pos = 0;                   // End position of the JSON data
 }
 /**
  * Handles HTTP client events.
@@ -161,16 +246,17 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
     switch (evt->event_id)
     {
     case HTTP_EVENT_ERROR:
-        ESP_LOGE(TAG, "HTTP_EVENT_ERROR");
+        ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
         break;
     case HTTP_EVENT_ON_CONNECTED:
-        ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
         break;
     case HTTP_EVENT_HEADER_SENT:
-        ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
         break;
     case HTTP_EVENT_ON_HEADER:
         tts_rx_total_len = 0;
+        is_data = false;
         break;
     case HTTP_EVENT_ON_DATA:
         if ((tts_rx_total_len + evt->data_len) < MAX_FILE_SIZE)
@@ -178,42 +264,10 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
             memcpy(tts_rx_buffer + tts_rx_total_len, (char *)evt->data, evt->data_len);
             tts_rx_total_len += evt->data_len;
         }
+        is_data = true;
         break;
     case HTTP_EVENT_ON_FINISH:
-        ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH:%" PRIu32 ", %" PRIu32 " K", tts_rx_total_len, tts_rx_total_len / 1024);
-
-        // Parse JSON data
-        cJSON *root = cJSON_Parse((const char *)tts_rx_buffer);
-        if (root != NULL)
-        {
-            cJSON *data_obj = cJSON_GetObjectItem(root, "data");
-            if (data_obj && data_obj->type == cJSON_Object)
-            {
-                cJSON *audio_item = cJSON_GetObjectItem(data_obj, "audio");
-                if (audio_item && audio_item->type == cJSON_String)
-                {
-                    size_t hex_audio_data_len = strlen(audio_item->valuestring);
-
-                    ESP_LOGI(TAG, "hex_audio_data_len: %zu", hex_audio_data_len);
-
-                    _write_hex_to_file(audio_item->valuestring, hex_audio_data_len);
-                }
-            }
-            cJSON_Delete(root);
-        }
-        ESP_LOGI(TAG, "--TTS Finished--");
-        // Play the audio file
-        FILE *fp = fopen("/spiffs/output.mp3", "r");
-        if (fp)
-        {
-            ESP_LOGI(TAG, "Starting play");
-            audio_player_play(fp);
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to open file.");
-        }
-
+        ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
         break;
     case HTTP_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
@@ -227,7 +281,7 @@ static esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 
-void _https_with_url_init(void)
+static void _https_with_url_init(void)
 {
     if (_g_client == NULL)
     {
@@ -236,6 +290,7 @@ void _https_with_url_init(void)
             .event_handler = _http_event_handler,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .buffer_size_tx = 2048, // Adjusted header buffer size
+            .buffer_size = 10240,
         };
         _g_client = esp_http_client_init(&config);
         if (_g_client == NULL)
@@ -247,6 +302,9 @@ void _https_with_url_init(void)
 }
 void app_minmax_tts_https_post(const char *text)
 {
+    uint32_t starttime = esp_log_timestamp();
+    ESP_LOGE(TAG, "[Start] create_TTS_request, timestamp:%" PRIu32, starttime);
+
     if (_g_client == NULL)
     {
         _https_with_url_init();
@@ -255,7 +313,7 @@ void app_minmax_tts_https_post(const char *text)
     esp_http_client_set_url(_g_client, CONFIG_MINMAX_TTS_URL);
     esp_http_client_set_method(_g_client, HTTP_METHOD_POST);
 
-    // 设置请求头
+    // Set header
     char auth_header[700];
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", CONFIG_MINMAX_API_KEY);
     esp_http_client_set_header(_g_client, "Authorization", auth_header);
@@ -278,6 +336,7 @@ void app_minmax_tts_https_post(const char *text)
     {
         ESP_LOGE(TAG, "Error perform http request %s", esp_err_to_name(err));
     }
+    ESP_LOGE(TAG, "[End] create_TTS_request, + offset:%" PRIu32, esp_log_timestamp() - starttime);
 
     free(post_data);
 }
@@ -298,10 +357,28 @@ void app_minmax_tts_deinit(void)
         esp_http_client_cleanup(_g_client);
     }
 }
+void parse_response_task(void *pvParameters)
+{
+    _init_parse_state();
+    while (true)
+    {
+
+        if (is_data && cur_cnt_pos <= tts_rx_total_len)
+        {
+            _update_parse_state();
+        }
+        else
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+    vTaskDelete(NULL);
+}
 void app_minmax_tts_init(void)
 {
     tts_rx_buffer = heap_caps_calloc(1, MAX_FILE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     assert(tts_rx_buffer);
     ESP_LOGI(TAG, "tts_rx_buffer with a size: %zu\n", MAX_FILE_SIZE);
     _https_with_url_init();
+    xTaskCreatePinnedToCore(parse_response_task, "parse_response_task", 1024 * 4, NULL, 1, NULL, 1);
 }
